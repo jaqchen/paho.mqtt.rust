@@ -230,11 +230,7 @@ mod build {
     extern crate cmake;
 
     use super::*;
-    use std::{
-//        path::Path,
-        process,
-        process::Command,
-    };
+    use std::path::PathBuf;
 
     // The openssl-sys crate does the hard part of finding the library,
     // but it only seems to set a variable for the path to the include files.
@@ -259,51 +255,10 @@ mod build {
         // We rerun the build if this `build.rs` file is changed.
         println!("cargo:rerun-if-changed=build.rs");
 
-        // Mske sure that the Git submodule is checked out
-        if !Path::new("paho.mqtt.c/.git").exists() {
-            let _ = Command::new("git")
-                        .args(&["submodule", "update", "--init"])
-                        .status();
-        }
-
-        // Configure cmake to build the Paho C lib
-        let ssl = if cfg!(feature = "ssl") { "on" } else { "off" };
-
-        let mut cmk_cfg = cmake::Config::new("paho.mqtt.c/");
-        cmk_cfg
-            .define("PAHO_BUILD_SHARED", "off")
-            .define("PAHO_BUILD_STATIC", "on")
-            .define("PAHO_ENABLE_TESTING", "off")
-            .define("PAHO_HIGH_PERFORMANCE", "on")
-            .define("PAHO_WITH_SSL", ssl);
-
-        if is_msvc() {
-            cmk_cfg.cflag("/DWIN32");
-        }
-
-        if let Some(ssl_dir) = openssl_root_dir() {
-            cmk_cfg.define("OPENSSL_ROOT_DIR", ssl_dir);
-        }
-
-        // 'cmk_install_dir' is a PathBuf to the cmake install directory
-        let cmk_install_path = cmk_cfg.build();
-        println!("debug:CMake output dir: {}", cmk_install_path.display());
-
-        let (lib_path, link_lib) = match find_link_lib(&cmk_install_path) {
-            Some(lib) => lib,
-            _ => {
-                println!("Error building Paho C library.");
-                process::exit(103);
-            },
-        };
-
-        println!("debug:Using Paho C library at: {} [{}]", lib_path.display(), link_lib);
-
         // Get bundled bindings or regenerate
-        let inc_dir = cmk_install_path.join("include");
-        println!("debug:Using Paho C headers at: {}", inc_dir.display());
-
-        bindings::place_bindings(&inc_dir);
+        let inc_dir = std::env::var("PAHO_MQTT_C_INCLUDE_DIR").unwrap();
+        println!("debug:Using Paho C headers at: {}", inc_dir);
+        bindings::place_bindings(PathBuf::from(inc_dir).as_path());
 
         // Link in the SSL libraries if configured for it.
         if cfg!(feature = "ssl") {
@@ -335,10 +290,9 @@ mod build {
                 println!("cargo:rustc-link-lib=User32");
             }
         }
-
-        // we add the folder where all the libraries are built to the path search
-        println!("cargo:rustc-link-search=native={}", lib_path.display());
-        println!("cargo:rustc-link-lib=static={}", link_lib);
+        let lib_path = std::env::var("PAHO_MQTT_C_LIB_DIR").unwrap();
+        println!("cargo:rustc-link-search={}", lib_path);
+        println!("cargo:rustc-link-lib=paho-mqtt3as");
     }
 }
 
